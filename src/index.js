@@ -3,6 +3,7 @@ import express from "express";
 import { env } from "./config/env.js";
 import { connectDB } from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
+import leadRoutes from "./routes/leadRoutes.js";
 
 const app = express();
 
@@ -26,6 +27,7 @@ app.get("/api/v1/health", (_req, res) => {
 
 // API Routes
 app.use("/api/v1/auth", authRoutes);
+app.use("/api/v1/leads", leadRoutes);
 
 // 404 Handler
 app.use((_req, res) => {
