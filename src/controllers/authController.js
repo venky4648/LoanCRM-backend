@@ -197,13 +197,13 @@ function hashToken(rawToken) {
   return crypto.createHash("sha256").update(rawToken).digest("hex");
 }
 
-const PERMITTED_ROLES = ["admin", "sales", "processing", "viewer"];
+const PERMITTED_ROLES = ["telecom", "relationship_manager", "manager", "superadmin"];
 
 const DEFAULT_TITLES = {
-  admin: { title: "Founder & Managing Director", dept: "Executive Management" },
-  sales: { title: "Senior Tele-Calling & Sales Exec", dept: "Sales & Lead Gen" },
-  processing: { title: "Lead Loan Processing Officer", dept: "Credit & Bank Operations" },
-  viewer: { title: "External Auditor / Operations Viewer", dept: "Audit & Compliance" },
+  superadmin: { title: "Admin / SUPERADMIN", dept: "Executive Management" },
+  telecom: { title: "Telecom Team", dept: "Telecom & Lead Generation" },
+  relationship_manager: { title: "Relationship Manager", dept: "Relationship & Credit Operations" },
+  manager: { title: "Manager", dept: "Operations Management" },
 };
 
 /**
@@ -229,7 +229,7 @@ export async function register(req, res) {
       });
     }
 
-    const selectedRole = role && PERMITTED_ROLES.includes(role) ? role : "sales";
+    const selectedRole = role && PERMITTED_ROLES.includes(role) ? role : "telecom";
 
     // Check if account already exists
     const existingUser = await User.findOne({ email: normalizedEmail });

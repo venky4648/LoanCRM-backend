@@ -11,6 +11,7 @@ const app = express();
 app.use(cors({ origin: env.CORS_ORIGIN }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use("/uploads", express.static("uploads"));
 
 // Base health check endpoints
 app.get("/", (_req, res) => {

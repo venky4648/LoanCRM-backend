@@ -90,7 +90,7 @@ export async function sendActivationEmail({ email, name, role, activationLink })
       <p style="font-size: 15px; color: #0F2237; line-height: 1.6;">Hi <strong>${name}</strong>,</p>
 
       <p style="font-size: 14px; color: #334155; line-height: 1.6;">
-        A new Loan CRM account has been registered for you with the assigned role: <strong style="color: #F26500;">${(role || "sales").toUpperCase()}</strong>.
+        A new Loan CRM account has been registered for you with the assigned role: <strong style="color: #F26500;">        ${(role || "telecom").toUpperCase()}</strong>.
       </p>
 
       <p style="font-size: 14px; color: #334155; line-height: 1.6;">
@@ -115,7 +115,7 @@ export async function sendActivationEmail({ email, name, role, activationLink })
     </div>
   `;
 
-  const text = `Hi ${name},\n\nA Loan CRM account has been created for you (${email}) with role: ${(role || "sales").toUpperCase()}.\n\nPlease set your password by visiting this link:\n${activationLink}\n\nThis activation link is valid for 24 hours. If you did not request this registration, please ignore this message.\n\nNormiloans CRM`;
+  const text = `Hi ${name},\n\nA Loan CRM account has been created for you (${email}) with role: ${(role || "telecom").toUpperCase()}.\n\nPlease set your password by visiting this link:\n${activationLink}\n\nThis activation link is valid for 24 hours. If you did not request this registration, please ignore this message.\n\nNormiloans CRM`;
 
   try {
     const res = await fetch(`${emailServiceUrl}/api/v1/email/send`, {
@@ -163,7 +163,7 @@ export async function sendWelcomeEmail({ email, name, role }) {
       <p>Your account has been successfully created in the <strong>Normiloans Education Lending Platform</strong>.</p>
       <div style="background-color: #EDF3FD; padding: 15px; border-radius: 6px; margin: 20px 0;">
         <p style="margin: 5px 0;"><strong>Work Email:</strong> ${email}</p>
-        <p style="margin: 5px 0;"><strong>Assigned Role:</strong> ${(role || "sales").toUpperCase()}</p>
+        <p style="margin: 5px 0;"><strong>Assigned Role:</strong> ${(role || "telecom").toUpperCase()}</p>
       </div>
       <p>You can now sign in to your dashboard to manage leads, student applications, and disbursements.</p>
       <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
@@ -171,7 +171,7 @@ export async function sendWelcomeEmail({ email, name, role }) {
     </div>
   `;
 
-  const text = `Hi ${name},\n\nWelcome to Normiloans CRM! Your account (${email}) has been created with role: ${(role || "sales").toUpperCase()}.\n\nNormiloans CRM`;
+  const text = `Hi ${name},\n\nWelcome to Normiloans CRM! Your account (${email}) has been created with role: ${(role || "telecom").toUpperCase()}.\n\nNormiloans CRM`;
 
   try {
     const res = await fetch(`${emailServiceUrl}/api/v1/email/send`, {

@@ -1,3 +1,7 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import multer from "multer";
 import { Lead } from "../models/Lead.js";
 
 // Helper to generate a unique NL-XXXX ID
@@ -10,14 +14,36 @@ async function generateUniqueLeadId() {
   return `NL-${Date.now().toString().slice(-4)}`;
 }
 
+const uploadDirectory = path.resolve(process.cwd(), "uploads");
+fs.mkdirSync(uploadDirectory, { recursive: true });
+
+const documentUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, callback) => callback(null, uploadDirectory),
+    filename: (_req, file, callback) => {
+      const extension = path.extname(file.originalname).toLowerCase();
+      callback(null, `${crypto.randomUUID()}${extension}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024, files: 30 },
+  fileFilter: (_req, file, callback) => {
+    const allowed = [
+      "application/pdf",
+      "image/jpeg",
+      "image/png",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ];
+    callback(allowed.includes(file.mimetype) ? null : new Error("Unsupported document format"), allowed.includes(file.mimetype));
+  },
+});
+
+export const uploadLeadDocumentsMiddleware = documentUpload.array("files", 30);
+
 // 1. Create a new Lead
 export async function createLead(req, res) {
   try {
     const data = req.body;
-
-    if (!data.student || !data.student.trim()) {
-      return res.status(400).json({ success: false, error: "Student name is required" });
-    }
 
     const leadId = data.id || data.leadId || (await generateUniqueLeadId());
 
@@ -32,23 +58,28 @@ export async function createLead(req, res) {
     const initialActivity = {
       id: `act_${Date.now()}`,
       type: "first_contact",
-      description: `Lead created for ${data.student} via ${data.source || "Website inquiry form"}.`,
+      description: `Lead created for ${data.student} via ${data.source || "Walk in"}${data.sourceName ? ` (${data.sourceName})` : ""}.`,
       updatedBy: data.owner || "Sales Team",
       timestamp: new Date().toISOString(),
     };
 
     const newLead = new Lead({
       leadId,
-      student: data.student.trim(),
+      student: typeof data.student === "string" ? data.student.trim() : "",
       phone: data.phone || "",
+      alternativePhone: data.alternativePhone || "",
       email: data.email || "",
-      source: data.source || "Website inquiry form",
-      country: data.country || "USA",
+      source: data.source || "Walk in",
+      sourceName: data.sourceName || "",
+      country: data.country || data.studyCountry || "",
+      planningCountry: data.planningCountry || "",
+      studyCountry: data.studyCountry || data.country || "",
       university: data.university || "University Partner",
       course: data.course || "MS Computer Science",
       intake: data.intake || "Fall 2026",
-      loanType: data.loanType === "Secured" ? "Secured" : "Unsecured",
-      amount: typeof data.amount === "number" ? data.amount : 3500000,
+      loanType: data.loanType === "Secured" || data.loanType === "Unsecured" ? data.loanType : "",
+      amount: typeof data.amount === "number" ? data.amount : 0,
+      loanRequirement: data.loanRequirement || "",
       stage: data.stage || "New Lead",
       contactStatus: data.contactStatus || "Not Contacted",
       interestStatus: data.interestStatus || "Not Contacted",
@@ -63,6 +94,31 @@ export async function createLead(req, res) {
         monthlyIncome: 80000,
         obligations: 10000,
         city: "Hyderabad",
+        phone: "",
+        alternativePhone: "",
+        email: "",
+        workplace: "",
+        vintage: "",
+        annualIncome: 0,
+        currentAddress: "",
+        permanentAddress: "",
+      },
+      guarantor: data.guarantor || {
+        name: "",
+        phone: "",
+        alternativePhone: "",
+        email: "",
+        relation: "",
+        employment: "",
+        organisation: "",
+        workplace: "",
+        vintage: "",
+        monthlyIncome: 0,
+        annualIncome: 0,
+        obligations: 0,
+        address: "",
+        currentAddress: "",
+        permanentAddress: "",
       },
       academics: data.academics || {
         tenth: "85%",
@@ -78,6 +134,12 @@ export async function createLead(req, res) {
         marketValue: 0,
         owner: "",
       },
+      studentDocuments: Array.isArray(data.studentDocuments) ? data.studentDocuments : [],
+      parentDocuments: Array.isArray(data.parentDocuments) ? data.parentDocuments : [],
+      propertyDocuments: Array.isArray(data.propertyDocuments) ? data.propertyDocuments : [],
+      studentDocumentsStatus: data.studentDocumentsStatus || "Not Received",
+      parentDocumentsStatus: data.parentDocumentsStatus || "Not Received",
+      propertyDocumentsStatus: data.propertyDocumentsStatus || "Not Received",
       workflowDocuments:
         Array.isArray(data.workflowDocuments) && data.workflowDocuments.length > 0
           ? data.workflowDocuments
@@ -104,6 +166,92 @@ export async function createLead(req, res) {
   } catch (error) {
     console.error("[createLead] Error:", error);
     res.status(500).json({ success: false, error: error.message || "Failed to create lead" });
+  }
+}
+
+export async function uploadLeadDocuments(req, res) {
+  try {
+    const { id } = req.params;
+    const { section } = req.body;
+    const sectionFields = {
+      student: "studentDocuments",
+      parent: "parentDocuments",
+      property: "propertyDocuments",
+    };
+    const fieldName = sectionFields[section];
+
+    if (!fieldName) {
+      return res.status(400).json({ success: false, error: "Invalid document section." });
+    }
+
+    let documents = [];
+    try {
+      documents = JSON.parse(req.body.documents || "[]");
+    } catch {
+      return res.status(400).json({ success: false, error: "Invalid document metadata." });
+    }
+
+    const lead = await Lead.findOne({
+      $or: [{ leadId: id }, { _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null }],
+    });
+    if (!lead) {
+      return res.status(404).json({ success: false, error: "Lead not found." });
+    }
+
+    let fileIds = [];
+    try {
+      fileIds = JSON.parse(req.body.fileIds || "[]");
+    } catch {
+      fileIds = [];
+    }
+    const uploadedById = new Map(
+      (req.files || []).map((file, index) => [String(fileIds[index] || ""), file])
+    );
+
+    const existing = new Map((lead[fieldName] || []).map((document) => [document.id || document.name, document]));
+    const normalized = documents.map((document) => {
+      const previous = existing.get(document.id) || existing.get(document.name);
+      const uploaded = uploadedById.get(String(document.id));
+      if (uploaded) {
+        return {
+          id: document.id || `doc_${Date.now()}`,
+          name: String(document.name || uploaded.originalname),
+          type: String(document.type || ""),
+          category: String(document.category || ""),
+          fileName: uploaded.originalname,
+          fileUrl: `/uploads/${uploaded.filename}`,
+          mimeType: uploaded.mimetype,
+          size: uploaded.size,
+          status: "Uploaded",
+          collectionStatus: document.collectionStatus || "Received",
+        };
+      }
+      return {
+        id: document.id || `doc_${Date.now()}`,
+        name: String(document.name || ""),
+        type: String(document.type || ""),
+        category: String(document.category || previous?.category || ""),
+        fileName: previous?.fileName || document.fileName || "",
+        fileUrl: previous?.fileUrl || document.fileUrl || "",
+        mimeType: previous?.mimeType || document.mimeType || "",
+        size: previous?.size || document.size || 0,
+        status: previous?.status || (document.fileName ? "Uploaded" : "Pending"),
+        collectionStatus: previous?.collectionStatus || document.collectionStatus || "Not Received",
+      };
+    });
+
+    lead[fieldName] = normalized;
+    await lead.save();
+
+    return res.json({
+      success: true,
+      section,
+      documents: normalized,
+      lead: { ...lead.toObject(), id: lead.leadId || String(lead._id) },
+    });
+  } catch (error) {
+    console.error("[uploadLeadDocuments] Error:", error);
+    return res.status(500).json({ success: false, error: error.message || "Failed to upload documents" });
   }
 }
 
@@ -390,6 +538,21 @@ export async function updateLeadDocument(req, res) {
 
     if (!lead) {
       return res.status(404).json({ success: false, error: "Lead not found." });
+    }
+
+    if (collectionStatus) {
+      for (const fieldName of ["studentDocuments", "parentDocuments", "propertyDocuments"]) {
+        for (const submittedDocument of lead[fieldName] || []) {
+          if (
+            (docId && submittedDocument.id === docId)
+            || (docName && submittedDocument.name?.toLowerCase() === docName.toLowerCase())
+          ) {
+            submittedDocument.collectionStatus = collectionStatus;
+            submittedDocument.status = collectionStatus === "Received" ? "Uploaded" : "Pending";
+          }
+        }
+        lead[fieldName] = lead[fieldName] || [];
+      }
     }
 
     if (!Array.isArray(lead.workflowDocuments) || lead.workflowDocuments.length === 0) {
@@ -858,7 +1021,274 @@ export async function addLeadComment(req, res) {
   }
 }
 
+// 17. Submit File to Lender & Lock
+export async function submitLeadToLender(req, res) {
+  try {
+    const { id } = req.params;
+    const { lender, applicationNo, notes, authorName } = req.body;
 
+    if (!lender || !lender.trim()) {
+      return res.status(400).json({ success: false, error: "Lender partner name is required." });
+    }
 
+    const lead = await Lead.findOne({
+      $or: [{ leadId: id }, { _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null }],
+    });
 
+    if (!lead) {
+      return res.status(404).json({ success: false, error: "Lead not found." });
+    }
 
+    const nowIso = new Date().toISOString();
+    const appNo = applicationNo && applicationNo.trim()
+      ? applicationNo.trim()
+      : `${lender.slice(0, 3).toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`;
+
+    lead.lender = lender.trim();
+    lead.lenderStatus = "Submitted";
+    lead.lenderApplicationNo = appNo;
+    lead.lenderSubmittedAt = nowIso;
+    lead.lenderSubmittedBy = authorName || "Processing Team";
+    lead.lenderLocked = true;
+    lead.lenderRejectionReason = "";
+    lead.stage = "Logged In";
+
+    if (!Array.isArray(lead.lenderSubmissions)) {
+      lead.lenderSubmissions = [];
+    }
+
+    const submissionRecord = {
+      id: `sub_${Date.now()}`,
+      lender: lead.lender,
+      applicationNo: appNo,
+      status: "Submitted",
+      submittedAt: nowIso,
+      submittedBy: lead.lenderSubmittedBy,
+      notes: notes || "File officially logged in and submitted to lender.",
+    };
+
+    lead.lenderSubmissions.unshift(submissionRecord);
+
+    lead.activities.unshift({
+      id: `act_${Date.now()}`,
+      type: "lender_submit",
+      description: `File officially submitted to ${lead.lender} (App No: ${appNo}). File is locked with lender.`,
+      comment: notes || undefined,
+      updatedBy: authorName || "Processing Team",
+      timestamp: nowIso,
+    });
+
+    await lead.save();
+
+    const formatted = lead.toObject();
+    formatted.id = formatted.leadId || String(formatted._id);
+
+    res.json({
+      success: true,
+      message: `File successfully submitted to ${lead.lender}`,
+      submission: submissionRecord,
+      lead: formatted,
+    });
+  } catch (error) {
+    console.error("[submitLeadToLender] Error:", error);
+    res.status(500).json({ success: false, error: error.message || "Failed to submit lead to lender" });
+  }
+}
+
+// 18. Update Lender Decision / Status (Underwriting, Sanctioned, Rejected, Disbursed)
+export async function updateLenderDecision(req, res) {
+  try {
+    const { id } = req.params;
+    const { status, rejectionReason, sanctionAmount, roi, tenure, notes, authorName } = req.body;
+
+    const lead = await Lead.findOne({
+      $or: [{ leadId: id }, { _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null }],
+    });
+
+    if (!lead) {
+      return res.status(404).json({ success: false, error: "Lead not found." });
+    }
+
+    const nowIso = new Date().toISOString();
+    const currentLender = lead.lender || "Lender Partner";
+
+    if (!Array.isArray(lead.lenderSubmissions)) {
+      lead.lenderSubmissions = [];
+    }
+
+    let activeSub = lead.lenderSubmissions[0];
+
+    if (status === "In Underwriting") {
+      lead.lenderStatus = "In Underwriting";
+      lead.stage = "Logged In";
+      if (activeSub) {
+        activeSub.status = "In Underwriting";
+      }
+
+      lead.activities.unshift({
+        id: `act_${Date.now()}`,
+        type: "underwriting",
+        description: `Application is under active Credit Underwriting review with ${currentLender}.`,
+        comment: notes || undefined,
+        updatedBy: authorName || "Processing Team",
+        timestamp: nowIso,
+      });
+    } else if (status === "Sanctioned" || status === "Approved") {
+      lead.lenderStatus = "Sanctioned";
+      lead.stage = "Sanctioned";
+      lead.lenderLocked = true;
+      lead.lenderRejectionReason = "";
+
+      if (sanctionAmount) lead.sanctioned = Number(sanctionAmount);
+      else if (!lead.sanctioned) lead.sanctioned = lead.amount;
+
+      if (roi) lead.roi = Number(roi);
+      if (tenure) lead.tenure = Number(tenure);
+
+      if (activeSub) {
+        activeSub.status = "Sanctioned";
+        activeSub.decisionAt = nowIso;
+        activeSub.sanctionAmount = lead.sanctioned;
+        activeSub.roi = lead.roi;
+        activeSub.tenure = lead.tenure;
+      }
+
+      lead.activities.unshift({
+        id: `act_${Date.now()}`,
+        type: "sanction",
+        description: `Loan Sanction Letter issued by ${currentLender} for INR ${lead.sanctioned.toLocaleString("en-IN")}${lead.roi ? ` @ ${lead.roi}%` : ""}.`,
+        comment: notes || "Sanction terms received from lender underwriting desk.",
+        updatedBy: authorName || "Processing Team",
+        timestamp: nowIso,
+      });
+    } else if (status === "Disbursed") {
+      lead.lenderStatus = "Disbursed";
+      lead.stage = "Disbursed";
+      if (!lead.disbursed) lead.disbursed = lead.sanctioned || lead.amount;
+
+      if (activeSub) {
+        activeSub.status = "Disbursed";
+        activeSub.decisionAt = nowIso;
+      }
+
+      lead.activities.unshift({
+        id: `act_${Date.now()}`,
+        type: "disbursement",
+        description: `Loan disbursed by ${currentLender} (INR ${lead.disbursed.toLocaleString("en-IN")}).`,
+        comment: notes || "Disbursement verified with university/forex desk.",
+        updatedBy: authorName || "Processing Team",
+        timestamp: nowIso,
+      });
+    } else if (status === "Rejected") {
+      const reason = rejectionReason || "Lender credit policy criteria not met.";
+      lead.lenderStatus = "Rejected";
+      lead.stage = "Rejected";
+      lead.lenderLocked = false; // UNLOCKED for re-routing to an alternative lender!
+      lead.lenderRejectionReason = reason;
+
+      if (activeSub) {
+        activeSub.status = "Rejected";
+        activeSub.decisionAt = nowIso;
+        activeSub.rejectionReason = reason;
+      }
+
+      lead.activities.unshift({
+        id: `act_${Date.now()}`,
+        type: "not_interested",
+        description: `Loan application declined / rejected by ${currentLender}.`,
+        comment: `Rejection Reason: ${reason}`,
+        updatedBy: authorName || "Processing Team",
+        timestamp: nowIso,
+      });
+    }
+
+    await lead.save();
+
+    const formatted = lead.toObject();
+    formatted.id = formatted.leadId || String(formatted._id);
+
+    res.json({
+      success: true,
+      message: `Lender decision updated to "${status}"`,
+      lead: formatted,
+    });
+  } catch (error) {
+    console.error("[updateLenderDecision] Error:", error);
+    res.status(500).json({ success: false, error: error.message || "Failed to update lender decision" });
+  }
+}
+
+// 19. Re-route to New Lender
+export async function rerouteLeadToNewLender(req, res) {
+  try {
+    const { id } = req.params;
+    const { newLender, applicationNo, reason, authorName } = req.body;
+
+    if (!newLender || !newLender.trim()) {
+      return res.status(400).json({ success: false, error: "New lender name is required." });
+    }
+
+    const lead = await Lead.findOne({
+      $or: [{ leadId: id }, { _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null }],
+    });
+
+    if (!lead) {
+      return res.status(404).json({ success: false, error: "Lead not found." });
+    }
+
+    const prevLender = lead.lender || "Previous Lender";
+    const nowIso = new Date().toISOString();
+    const appNo = applicationNo && applicationNo.trim()
+      ? applicationNo.trim()
+      : `${newLender.slice(0, 3).toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`;
+
+    lead.lender = newLender.trim();
+    lead.lenderStatus = "Submitted";
+    lead.lenderApplicationNo = appNo;
+    lead.lenderSubmittedAt = nowIso;
+    lead.lenderSubmittedBy = authorName || "Processing Team";
+    lead.lenderLocked = true;
+    lead.lenderRejectionReason = "";
+    lead.stage = "Logged In";
+
+    if (!Array.isArray(lead.lenderSubmissions)) {
+      lead.lenderSubmissions = [];
+    }
+
+    const newSub = {
+      id: `sub_${Date.now()}`,
+      lender: lead.lender,
+      applicationNo: appNo,
+      status: "Submitted",
+      submittedAt: nowIso,
+      submittedBy: lead.lenderSubmittedBy,
+      notes: reason ? `Re-routed: ${reason}` : `Re-routed following previous decline by ${prevLender}.`,
+    };
+
+    lead.lenderSubmissions.unshift(newSub);
+
+    lead.activities.unshift({
+      id: `act_${Date.now()}`,
+      type: "reroute",
+      description: `File re-routed from ${prevLender} to new partner ${lead.lender} (App No: ${appNo}). File re-locked for review.`,
+      comment: reason || `Deal saved by switching to ${lead.lender}.`,
+      updatedBy: authorName || "Processing Team",
+      timestamp: nowIso,
+    });
+
+    await lead.save();
+
+    const formatted = lead.toObject();
+    formatted.id = formatted.leadId || String(formatted._id);
+
+    res.json({
+      success: true,
+      message: `File successfully re-routed to ${lead.lender}`,
+      submission: newSub,
+      lead: formatted,
+    });
+  } catch (error) {
+    console.error("[rerouteLeadToNewLender] Error:", error);
+    res.status(500).json({ success: false, error: error.message || "Failed to re-route lead to new lender" });
+  }
+}

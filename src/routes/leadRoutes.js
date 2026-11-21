@@ -16,6 +16,11 @@ import {
   handoverLead,
   updateLeadLender,
   addLeadComment,
+  submitLeadToLender,
+  updateLenderDecision,
+  rerouteLeadToNewLender,
+  uploadLeadDocuments,
+  uploadLeadDocumentsMiddleware,
 } from "../controllers/leadController.js";
 
 const router = Router();
@@ -40,8 +45,15 @@ router.route("/:id/reactivate").post(reactivateLeadBackend);
 router.route("/:id/handover").post(handoverLead);
 router.route("/:id/lender").put(updateLeadLender).patch(updateLeadLender);
 
+// Dedicated Lender Lifecycle: Submission, Decision & Re-routing
+router.route("/:id/lender/submit").post(submitLeadToLender);
+router.route("/:id/lender/status").put(updateLenderDecision).patch(updateLenderDecision);
+router.route("/:id/lender/reroute").post(rerouteLeadToNewLender);
+
 // General Comments & Interaction Timeline routes (Stage 5)
 router.route("/:id/comments").post(addLeadComment);
 
-export default router;
+// Uploaded application documents
+router.post("/:id/documents/upload", uploadLeadDocumentsMiddleware, uploadLeadDocuments);
 
+export default router;
